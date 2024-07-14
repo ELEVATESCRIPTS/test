@@ -1,0 +1,97 @@
+$smtpServer="smtp.bergerbd.com"
+$expireindays = 9
+$from = "noreply@bergerbd.com"
+$logging = "Enabled" # Set to Disabled to Disable Logging
+$ct = get-date -format yyyyMMdd-hhmm
+$logFile = "c:\logs\AccountExpiry-$ct.csv" # ie. c:\mylog.csv
+$testing = "Disabled" # Set to Disabled to Email Users
+$testRecipient = "sakib@bergerbd.com"
+
+# Check Logging Settings
+if (($logging) -eq "Enabled")
+{
+    # Test Log File Path
+    $logfilePath = (Test-Path $logFile)
+    if (($logFilePath) -ne "True")
+    {
+        # Create CSV File and Headers
+        New-Item $logfile -ItemType File
+        Add-Content $logfile "Date,DisplayName,EmailAddress,DaystoExpire,ExpiresOn,Notified"
+    }
+} # End Logging Check
+
+
+$today = (get-date)
+$date = Get-Date -format ddMMyyyy
+# End System Settings
+
+# Get Users From AD who are Enabled, Passwords Expire and are Not Currently Expired
+Import-Module ActiveDirectory
+$users = get-aduser -filter * -searchbase "OU=Restricted Users,DC=bergerbd,DC=com" -properties DisplayName, PasswordNeverExpires, PasswordExpired, PasswordLastSet, EmailAddress, AccountExpirationDate | where { $_.Enabled -eq "True" -AND $_.EmailAddress -ne $null -AND $_.AccountExpirationDate -gt (Get-Date)}
+
+# Process Each User for Password Expiry
+foreach ($user in $users)
+{
+    $Name = $user.DisplayName
+    $emailaddress = $user.emailaddress
+    $AccountExpDate = $user.AccountExpirationDate
+    $sent = "" # Reset Sent Flag
+
+    
+    $daystoexpire = (New-TimeSpan -Start (get-date) -End $AccountExpDate).Days
+    
+    # Email Subject Set Here
+    $subject="Your account will expire on $AccountExpDate"
+  
+    # Email Body Set Here, Note You can use HTML, including Images.
+    $body ="Dear $Name,
+    <p> 
+	Your account will expire on $AccountExpDate. If required, please request the project or operational manager to initiate the process to extend your access. -
+	</p>
+	
+    <p>
+	Thanks - <br>
+	IT Infrastructure
+    </p>"
+
+   
+    # If Testing Is Enabled - Email Administrator
+    if (($testing) -eq "Enabled")
+    {
+        $emailaddress = $testRecipient
+    } # End Testing
+
+    # If a user has no email address listed
+    if (($emailaddress) -eq $null)
+    {
+        $emailaddress = $testRecipient    
+    }# End No Valid Email
+
+    # Send Email Message
+    if (($daystoexpire -ge "0") -and ($daystoexpire -lt $expireindays))
+    {
+        $sent = "Yes"
+        # If Logging is Enabled Log Details
+        if (($logging) -eq "Enabled")
+        {
+            Add-Content $logfile "$date,$Name,$emailaddress,$daystoExpire,$AccountExpDate,$sent" 
+        }
+        # Send Email Message
+        Send-Mailmessage -smtpServer $smtpServer -from $from -to $emailaddress -subject $subject -body $body -bodyasHTML -priority High
+		start-sleep 30
+    } # End Send Message
+    else # Log Non Expiring Password
+    {
+        $sent = "No"
+        # If Logging is Enabled Log Details
+        if (($logging) -eq "Enabled")
+        {
+            Add-Content $logfile "$date,$Name,$emailaddress,$daystoExpire,$AccountExpDate,$sent" 
+        }        
+    }
+    
+} # End User Processing
+
+
+
+# End
